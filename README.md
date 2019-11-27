@@ -7,11 +7,11 @@ __重要__: 如果本地git低于 `2.15` 的话需要更新到最新的git。可
 
 ## 安装
 
-### 项目安装
+#####项目安装
 
 将 `commit-msg` 放置到项目目录下的 `.git/hooks` 目录内
 
-### 全局安装
+##### 全局安装
 
 __注意：对新建项目有效，对原有项目无效！__
 
@@ -30,6 +30,7 @@ git config --global init.templatedir '~/.git-template'
 ZT_HOST="实际禅道访问地址"
 ZT_USER="禅道帐号"
 ZT_PASS="禅道密码"
+PROJECT_XCODEPROJ_FILE="XCode项目文件路径"
 ```
 
 ## 功能
@@ -40,11 +41,14 @@ ZT_PASS="禅道密码"
 <type>(<scope>): <subject>
 <BLANK LINE>
 <body>
+<Code Reviewer: xxxx>
 <BLANK LINE>
 <footer>
 ```
 
-### 日志Type说明
+`Merge` 和 `Revert ` 的提交不进行规范校验
+
+##### 日志Type说明
 
 日志允许如下这些日志分类，方便输出 `release note` 或 `changelog`
 
@@ -72,21 +76,21 @@ ZT_PASS="禅道密码"
     Adding missing tests
   chore:
     工程化更新（编译脚本、辅助工具等）
-    Changes to the build process or auxiliary tools and libraries such as documentation generation
+    Changes to the build process or auxiliary tools and libraries such as documentation generatio
 ```
 
-### 自动执行禅道事务（可选）
+##### 自动执行禅道事务（可选）
 
 要让git提交可以自动执行禅道内的事务操作，如关闭bug，完成需求，记录工作日志等，这些都在 `<Scope>` 内来标记。
 
-- `#1001` 完成一个需求任务
-- `#1001-1-12` 在一个需求任务内记录工作日志
-- `@2001`完成一个BUG
-- `@2001-1` 在一个BUG内记录工作日志
+- `@1001` 完成一个需求任务
+- `@1001-commit` 在一个需求任务内记录工作日志
+- `#2001`完成一个BUG
+- `#2001-commit` 在一个BUG内记录工作日志
 
-在 `<scope>` 内可以填写多个指令，指令之间以 `,` 号分隔
+在 `<scope>` 内可以填写多个指令，指令之间以 `/` 号分隔
 
-## 示例
+#####示例
 
 一个最简单的提交日志：
 
@@ -97,7 +101,7 @@ docs: 接口文档更新
 提交一个新功能，同时关闭9528号禅道任务和9000号禅道BUG，并在9527号禅道任务中记录工作日志，消耗1小时，剩余2小时，日志内容即提交日志内容。
 
 ```bash
-feat(#9528,#9527-1-2,@9000): 完成留言回复功能，并解决留言无法回复问题
+feat(@9528/@9527-commit/#9000): 完成留言回复功能，并解决留言无法回复问题
 
 可以引用回复，引用内容截取
 被回复者会收到站内短信通知
