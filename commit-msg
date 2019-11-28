@@ -35,11 +35,10 @@
 ###      工程化更新（编译脚本、辅助工具等）
 ###      Changes to the build process or auxiliary tools and libraries such as documentation generation
 #######################################################################
-###  fix(#9527-commit/#9528/@9900-commit/@9000/module/file/business): SUBJECT TITLE
+###  fix(#9527-commit|#9528|@9900-commit|@9000|module|file): SUBJECT TITLE
 ###
 ###  contents line1....
 ###  contents line2....
-###  Code Reviewer: xxx
 ###
 ###  footer line...
 #######################################################################
@@ -50,12 +49,18 @@
 set -u
 # set -e
 
-ZT_HOST=
-ZT_USER=
-ZT_PASS=
-PROJECT_XCODEPROJ_FILE=
+ZT_HOST= 
+ZT_USER= 
+ZT_PASS= 
 
-DEBUG_LEVEL=0
+# xcode 项目文件，用来查询版本号
+PROJECT_XCODEPROJ_FILE= 
+# BUG解决的版本名称模板
+# iOS_MARKETING_VERSION_BRANCH_NAME_build_XXXX 
+# 其中 MARKETING_VERSION 换成版本号；BRANCH_NAME 换成分支名 (分支 feature/A/1 的名称是 1）
+VERSION_NAME=
+
+DEBUG_LEVEL=1
 
 COMMIT_MSG_FILE=$1
 COMMIT_CONTENT=
@@ -92,13 +97,12 @@ ERR_MSG_LAST_PERIOD="[ERROR]108: Do not end the subject line with a period"
 ERR_MSG_BLANK_LINE="[ERROR]109: Separate subject from body with a blank line"
 ERR_MSG_TITLE_FORMAT="[ERROR]110: Commit message bad format!\r\n<Type>(<Scope>): Subject\r\n\
 Type: feat|fix|docs|style|refactor|perf|test|chore\r\n\
-Scope: module | #bugid | #bugid-commit | @taskid | @taskid-commit \r\n\
-Subject: frist letter must be lowercase \r\n\
-Finish Task Example: \r\n\
+Scope: module|#bugid|#bugid-commit|@taskid|@taskid-commit\r\n\
+Subject: frist letter must be lowercase\r\n\
+Finish Task Example:\r\n\
 feat(#1122): subject content\r\n\r\n\
 \
-content description\r\n\
-Code Reviewer: xxx"
+content description"
 ERR_NO_XCPJ_FILE="[ERROR]111: xcodeproj file not exist"
 
 ERR_DEBUG="[ERROR]200: Debug breaking..."
@@ -108,12 +112,12 @@ ERR_DEBUG="[ERROR]200: Debug breaking..."
 # util functions
 #######################################################################
 # remove \" in json, and echo value for given key
-_parse_json(){
+_parse_jsonvalue_by_key(){
     #echo "${1//\\\"/}" | sed 's/\\\\/\\/g' | sed 's/\\\\/\\/g' | sed "s/.*$2:\([^,}]*\).*/\1/"
     echo "$1" | sed 's/\\"//g' | sed 's/\\\\/\\/g' | sed 's/\\\\/\\/g' | sed "s/.*$2:\([^,}]*\).*/\1/"
 }
 
-_parse_jsonValue(){
+_parse_jsonkey_by_value(){
     if [[ $1 =~ $2 ]];then
         echo "$1" | sed 's/\\"//g' | sed 's/\\\\/\\/g' | sed 's/\\\\/\\/g' | sed "s/.*[,}]\(.*\):$2.*/\1/"
     fi
@@ -179,12 +183,7 @@ validator(){
     if [ ! -f "$COMMIT_MSG_FILE" ]; then
         log_error_exit ${ERR_NO_FILE}
     fi
-
-    # XCode 项目文件存在
-    if [ ! -f "$PROJECT_XCODEPROJ_FILE" ]; then
-        log_error_exit ${ERR_NO_XCPJ_FILE}
-    fi
-
+    
     # 读取提交消息内容
     COMMIT_CONTENT=`cat ${COMMIT_MSG_FILE}`
     COMMIT_FIRST_LINE=`echo "${COMMIT_CONTENT}" | head -1`
@@ -227,13 +226,13 @@ validate_base_format(){
     elif [[ ${COMMIT_FIRST_LINE} =~ ^(Revert ).*$ ]];then
         log_info "Ignore Revert Commit"
     else
-        if [[ ${COMMIT_FIRST_LINE} =~ ^(feat|fix|docs|style|refactor|perf|test|chore)([\(]?[a-zA-Z0-9\#\@\/\-]*[\)]?)[[:blank:]]?:[[:blank:]]?(.*)$ ]]; then
+        if [[ ${COMMIT_FIRST_LINE} =~ ^(feat|fix|docs|style|refactor|perf|test|chore)([\(]?[a-zA-Z0-9\#\@\|\-]*[\)]?)[[:blank:]]?:[[:blank:]]?(.*)$ ]]; then
             COMMIT_TYPE=${BASH_REMATCH[1]}
             COMMIT_SCOPE=${BASH_REMATCH[2]}
             COMMIT_SUBJECT=${BASH_REMATCH[3]}
             # match code reviewer
             if [[ ! $COMMIT_CONTENT =~ (Code *Reviewer){1} ]];then
-                log_error_exit "$COMMIT_CONTENT \n没有Code Reviwer."
+                log_info "Don't have Code Reviwer."
             fi
         else
             log_error_exit ${ERR_MSG_TITLE_FORMAT}
@@ -246,13 +245,13 @@ validate_scope_message(){
     if [[ ${#COMMIT_SCOPE} -lt 1 ]]; then
         log_info "no scope to process"
     # validate scope format and get scope content
-    elif [[ ${COMMIT_SCOPE} =~ ^\(([\#\@]?[a-zA-Z0-9\#\@\/\-]*)\)$ ]]; then
+    elif [[ ${COMMIT_SCOPE} =~ ^\(([\#\@]?[a-zA-Z0-9\#\@\|\-]*)\)$ ]]; then
         COMMIT_SCOPE_CONTENT=${BASH_REMATCH[1]}
         if [[ ${#COMMIT_SCOPE_CONTENT} -lt 2 ]]; then
             log_error_exit "scope bad format less 2 ${COMMIT_SCOPE_CONTENT}"
         fi
         # split to task array
-        SCOPE_TASKS=(${COMMIT_SCOPE_CONTENT//// })
+        SCOPE_TASKS=(${COMMIT_SCOPE_CONTENT//|/ })
         log_debug "SCOPES ${SCOPE_TASKS}"
         SCOPE_TASKS_NUM=${#SCOPE_TASKS[@]}
         log_debug "SCOPES_NUM ${SCOPE_TASKS_NUM}"
@@ -275,10 +274,14 @@ validate_scope_message(){
 }
 
 _next_build_name(){
-    XCODEPROJ_CONTENT=`cat ${PROJECT_XCODEPROJ_FILE}`
-    MARKETING_VERSION=`echo ${XCODEPROJ_CONTENT} | grep "MARKETING_VERSION = " | sed "s/.*MARKETING_VERSION = \([^;]*\).*/\1/"`
-    BRANCH_NAME=`git branch | sed -n '/*/p' | sed "s/\* //;s/.*\/\(.*\)/\1/"`
-    echo "iOS_${MARKETING_VERSION}_${BRANCH_NAME}_build_XXXX"
+    # XCode 项目文件存在
+    if [[ -f "$PROJECT_XCODEPROJ_FILE" ]]; then
+        XCODEPROJ_CONTENT=`cat ${PROJECT_XCODEPROJ_FILE}`
+        MARKETING_VERSION=`echo ${XCODEPROJ_CONTENT} | grep "MARKETING_VERSION = " | sed "s/.*MARKETING_VERSION = \([^;]*\).*/\1/"`
+        BRANCH_NAME=`git branch | sed -n '/*/p' | sed "s/\* //;s/.*\/\(.*\)/\1/"`
+        echo ${VERSION_NAME} | sed "s/MARKETING_VERSION/${MARKETING_VERSION}/" | sed "s/BRANCH_NAME/${BRANCH_NAME}/"
+        # echo "iOS_${MARKETING_VERSION}_${BRANCH_NAME}_build_XXXX"
+    fi
 }
 
 
@@ -356,21 +359,25 @@ process_bug_finish(){
         log_info "do resolve bug[${1}] error, unknow reason"
     fi
     # log_debug ${_RST}
-    BUG_STATUS=$(_parse_json "${_RST}" "status")
+    BUG_STATUS=$(_parse_jsonvalue_by_key "${_RST}" "status")
     if [[ $BUG_STATUS == 'active' ]]; then
-        CON_FINISH_ASSIGNED=$(_parse_json "${_RST}" "assignedTo")
+        CON_FINISH_ASSIGNED=$(_parse_jsonvalue_by_key "${_RST}" "assignedTo")
+        RESOLVED_BUILD_ID=
         BUILD_NAME=$(_next_build_name)
-        RESOLVED_BUILD_ID=$(_parse_jsonValue "${_RST}" "${BUILD_NAME}")
-        if [[ ! ${RESOLVED_BUILD_ID} =~ ^[0-9]+$ ]]; then
-            log_info "没找到解决 BUG 的下一个版本： ${BUILD_NAME}"
-        else
-            # 发送完成禅道任务的请求
-            _URL_FORM_DATA="resolution=fixed&resolvedBuild=${RESOLVED_BUILD_ID}&assignedTo=${CON_FINISH_ASSIGNED}&resolvedDate=$(_date_time)&comment=${ENCODE_CONTENT}"
-            _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
-            log_debug ${_RST}
-            if echo "${_RST}" | grep -w "login" &>/dev/null; then
-                log_info "do resolve bug[${1}] error, need login"
+        echo "name: ${BUILD_NAME}"
+        if [[ -z ${BUILD_NAME} ]];then
+            RESOLVED_BUILD_ID=$(_parse_jsonkey_by_value "${_RST}" "${BUILD_NAME}")
+            if [[ ! ${RESOLVED_BUILD_ID} =~ ^[0-9]+$ ]]; then
+                RESOLVED_BUILD_ID=
+                log_info "没找到解决 BUG 的下一个版本： ${BUILD_NAME}，解决版本留空。"
             fi
+        fi
+        # 发送完成禅道任务的请求
+        _URL_FORM_DATA="resolution=fixed&resolvedBuild=${RESOLVED_BUILD_ID}&assignedTo=${CON_FINISH_ASSIGNED}&resolvedDate=$(_date_time)&comment=${ENCODE_CONTENT}"
+        _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
+        log_debug ${_RST}
+        if echo "${_RST}" | grep -w "login" &>/dev/null; then
+            log_info "do resolve bug[${1}] error, need login"
         fi
     else
         log_info "bug[${1}] had been resolved"
@@ -409,11 +416,11 @@ process_feature_finish(){
         log_info "do finish task[${1}] error, unknow reason"
     fi
     # log_debug ${_RST}
-    DATA=$(_parse_json "${_RST}" "data")
-    BUG_STATUS=$(_parse_json "${DATA}" "status")
+    DATA=$(_parse_jsonvalue_by_key "${_RST}" "data")
+    BUG_STATUS=$(_parse_jsonvalue_by_key "${DATA}" "status")
     if [[ $BUG_STATUS == 'active' ]]; then
-        CON_FINISH_CONSUMED=$(_parse_json "${_RST}" "consumed")
-        CON_FINISH_ASSIGNED=$(_parse_json "${_RST}" "assignedTo")
+        CON_FINISH_CONSUMED=$(_parse_jsonvalue_by_key "${_RST}" "consumed")
+        CON_FINISH_ASSIGNED=$(_parse_jsonvalue_by_key "${_RST}" "assignedTo")
 
         # 发送完成禅道任务的请求
         _URL="${ZT_HOST}?m=task&f=finish&taskID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
@@ -464,9 +471,9 @@ do_get_session(){
     if echo "${_RST}" | grep -vw "success" &>/dev/null; then
         log_error_exit ${ERR_SESSION_RST}
     fi
-    ZT_SESSION_NAME=$(_parse_json $_RST "sessionName")
+    ZT_SESSION_NAME=$(_parse_jsonvalue_by_key $_RST "sessionName")
     log_debug "GET SESSION NAME: $ZT_SESSION_NAME"
-    ZT_SESSION=$(_parse_json $_RST "sessionID")
+    ZT_SESSION=$(_parse_jsonvalue_by_key $_RST "sessionID")
     log_debug "GET SESSION ID: $ZT_SESSION"
     if [[ $ZT_SESSION_NAME == "" || $ZT_SESSION == "" ]]; then
         log_error_exit ${ERR_SESSION_DATA}
