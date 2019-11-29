@@ -55,17 +55,19 @@ ZT_PASS=
 
 # 'xxx.xcodeproj/project.pbxproj' xcode 项目文件，用来查询版本号
 PROJECT_XCODEPROJ_FILE=
-# 'iOS_MARKETING_VERSION_BRANCH_NAME_build_XXXX ' BUG解决的版本名称模板
+# 'iOS_MARKETING_VERSION_BRANCH_NAME_build_XXXX' BUG解决的版本名称模板
 # 其中 MARKETING_VERSION 换成版本号；BRANCH_NAME 换成分支名 (分支 feature/A/1 的名称是 1）
 VERSION_NAME=
 
+#GIT_PREVIOUS_SUCCESSFUL_COMMIT='a917c7a'
+#GIT_COMMIT='e716e4e
+GIT_COMMIT_INFO=
+GIT_BRANCH_NAME=
+
 DEBUG_LEVEL=0
 
-COMMIT_MSG_FILE=$1
 COMMIT_CONTENT=
 ENCODE_CONTENT=
-COMMIT_FIRST_LINE=
-COMMIT_TOTAL_LINE=
 COMMIT_SUBJECT=
 COMMIT_TYPE=
 COMMIT_SCOPE=
@@ -89,23 +91,13 @@ _URL_CONTENT_TYPE="content-type: application/x-www-form-urlencoded"
 ERR_SESSION_RST="[ERROR]101: Get session request error"
 ERR_SESSION_DATA="[ERROR]102: Get session result error"
 ERR_LOGIN="[ERROR]103: Shit happened when login to zentao with your account, please check account and password in this hook script [prepare-commit-msg] ."
-ERR_NO_FILE="[ERROR]105: Commit message file not exist"
-ERR_MSG_EMPTY="[ERROR]106: Commit message can not empty"
-ERR_MSG_FIRST_EMPTY="[ERROR]107: First line can not empty"
-ERR_MSG_LAST_PERIOD="[ERROR]108: Do not end the subject line with a period"
-ERR_MSG_BLANK_LINE="[ERROR]109: Separate subject from body with a blank line"
-ERR_MSG_TITLE_FORMAT="[ERROR]110: Commit message bad format!\r\n<Type>(<Scope>): Subject\r\n\
-Type: feat|fix|docs|style|refactor|perf|test|chore\r\n\
-Scope: module|#bugid|#bugid-commit|@taskid|@taskid-1-2|@taskid-commit\r\n\
-Subject: frist letter must be lowercase\r\n\
-Finish Task Example:\r\n\
-feat(#1122): subject content\r\n\r\n\
-\
-content description"
-ERR_NO_XCPJ_FILE="[ERROR]111: xcodeproj file not exist"
-
+ERR_NO_COMMIT="[INFO] No commits"
 ERR_DEBUG="[ERROR]200: Debug breaking..."
 
+#######################################################################
+
+ERROR_CODE_NULL=1
+ERROR_CODE_HEAD_FORMAT=2
 
 #######################################################################
 # util functions
@@ -129,7 +121,7 @@ _parse_json_in_note_value_by_key(){
 }
 
 _parse_json_value_by_key(){
-    _parse_json_format "${1}" | sed -n "s/.*\"$2\":\"\([^\"]*\).*/\1/p"
+    echo $(_parse_json_format "${1}") | sed -n "s/.*\"$2\":\"\([^\"]*\).*/\1/p"
 }
 
 # simple url encode
@@ -158,9 +150,9 @@ _date_fmt(){
     echo `date "+%Y-%m-%d"`
 }
 
-log_error_exit(){
-    echo -e "$(log_title) [ERROR] $@"
-    exit 1
+log_exit(){
+    echo -e "$(log_title) [INFO] $@"
+    exit 0
 }
 
 log_info(){
@@ -185,12 +177,36 @@ log_title(){
 
 #####################################################################
 
+_git_commits() {
+    # git log --format="%s(%H)(%ae)(%ci)" "${GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${GIT_COMMIT}"
+    git log -100 --format="%s(%H)(%ae)(%ci)"
+}
+
+_git_commit_head() {
+    echo "${1}" | sed -n "s/^\(.*\)(.*)(.*)(.*)$/\1/p"
+}
+
+_git_commit_hash() {
+    echo "${1}" | sed -n 's/^.*(\(.*\))(.*)(.*)$/\1/p'
+}
+
+_git_commit_auth() {
+    echo "${1}" | sed -n 's/^.*(.*)(\(.*\))(.*)$/\1/p' | sed -n "s/\(.*\)@.*$/\1/p"
+}
+
+_git_commit_time() {
+    echo "${1}" | sed -n 's/^.*(.*)(.*)(\(.*\))$/\1/p' | sed -n "s/\(.*\) +[0-9]\{4\}$/\1/p"
+}
+
+#####################################################################
+
 _next_build_name(){
     # XCode 项目文件存在
     if [[ -f "$PROJECT_XCODEPROJ_FILE" ]]; then
         XCODEPROJ_CONTENT=`cat ${PROJECT_XCODEPROJ_FILE}`
         MARKETING_VERSION=`echo ${XCODEPROJ_CONTENT} | grep "MARKETING_VERSION = " | sed "s/.*MARKETING_VERSION = \([^;]*\).*/\1/"`
         GIT_BRANCH_NAME=`git branch | sed -n '/*/p' | sed "s/\* //;s/.*\/\(.*\)/\1/"`
+        # GIT_BRANCH_NAME=`echo ${BRANCH_NAME} | sed "s/\* //;s/.*\/\(.*\)/\1/"`
         # if [[ ${GIT_BRANCH_NAME} == 'dev_jenkins' ]];then
         #     echo ${VERSION_NAME} | sed "s/MARKETING_VERSION/${MARKETING_VERSION}/" | sed "s/_BRANCH_NAME//"
         # else
@@ -203,64 +219,40 @@ _next_build_name(){
 # validator
 validator(){
     log_debug "validator..."
-    # 日志信息文件存在
-    if [ ! -f "$COMMIT_MSG_FILE" ]; then
-        log_error_exit ${ERR_NO_FILE}
+    # 是否有变更
+    if [[ ${GIT_PREVIOUS_SUCCESSFUL_COMMIT} == ${GIT_COMMIT} ]];then
+        log_exit ${ERR_NO_COMMIT}
     fi
-    
-    # 读取提交消息内容
-    COMMIT_CONTENT=`cat ${COMMIT_MSG_FILE}`
-    COMMIT_FIRST_LINE=`echo "${COMMIT_CONTENT}" | head -1`
-    ENCODE_CONTENT=${COMMIT_FIRST_LINE} #不需要处理 $(_url_encode "$COMMIT_FIRST_LINE")
-    COMMIT_TOTAL_LINE=`echo "${COMMIT_CONTENT}" | wc -l`
-    validate_base_format
     if [[ ${ZT_HOST} == "" || ${ZT_USER} == "" || ${ZT_PASS} == "" ]]; then
         log_info "zentao config error, skip scope magic."
     else
-        validate_scope_message
+        # 读取提交消息内容
+        _git_commits | while read GIT_COMMIT_INFO
+        do
+            COMMIT_CONTENT=`_git_commit_head "${GIT_COMMIT_INFO}"`
+            ENCODE_CONTENT=${COMMIT_CONTENT}
+            validate_base_format
+            if [[ $? == 0 ]];then
+                validate_scope_message
+            fi
+        done
     fi
 }
 
 validate_base_format(){
     # 校验整体格式是否合规
     ##########################################################
-    # 1. 禁止空提交
+    # 1. 禁止空
     if [[ ${#COMMIT_CONTENT} -lt 1 ]]; then
-        log_error_exit ${ERR_MSG_EMPTY}
+        return ${ERROR_CODE_NULL}
     fi
-    # 2.第一行不能为空
-    if [[ ${#COMMIT_FIRST_LINE} -lt 1 ]]; then
-        log_error_exit ${ERR_MSG_FIRST_EMPTY}
-    fi
-    # 3. 标题行不能以.结尾
-    if [[ ${COMMIT_FIRST_LINE} =~ ^.*\.$ ]]; then
-          log_error_exit ${ERR_MSG_LAST_PERIOD}
-    fi
-    # 4. 如果有提交正文说明，则检测标题行与正文之间必须要有空行
-    if [[ ${COMMIT_TOTAL_LINE} -gt 1 ]]; then
-        COMMIT_2D_LINE=`echo "${COMMIT_CONTENT}" | head -n 2 | tail -n 1`
-        log_debug "2d line: ${COMMIT_2D_LINE}"
-        if [[ ${#COMMIT_2D_LINE} -gt 0 ]]; then
-            log_error_exit ${ERR_MSG_BLANK_LINE}
-        fi
-    fi
-    # 5. 检测第一行格式是否正确: Type(scope): title
-    if [[ ${COMMIT_FIRST_LINE} =~ ^(Merge ).*$ ]];then
-        log_info "Ignore Merge Commit"
-    elif [[ ${COMMIT_FIRST_LINE} =~ ^(Revert ).*$ ]];then
-        log_info "Ignore Revert Commit"
+    # 2. 格式是否正确: Type(scope): title
+    if [[ ${COMMIT_CONTENT} =~ ^(feat|fix|docs|style|refactor|perf|test|chore)([\(]?[a-zA-Z0-9\.\#\@\|\-]*[\)]?)[[:blank:]]?:[[:blank:]]?(.*)$ ]]; then
+        COMMIT_TYPE=${BASH_REMATCH[1]}
+        COMMIT_SCOPE=${BASH_REMATCH[2]}
+        COMMIT_SUBJECT=${BASH_REMATCH[3]}
     else
-        if [[ ${COMMIT_FIRST_LINE} =~ ^(feat|fix|docs|style|refactor|perf|test|chore)([\(]?[a-zA-Z0-9\.\#\@\|\-]*[\)]?)[[:blank:]]?:[[:blank:]]?(.*)$ ]]; then
-            COMMIT_TYPE=${BASH_REMATCH[1]}
-            COMMIT_SCOPE=${BASH_REMATCH[2]}
-            COMMIT_SUBJECT=${BASH_REMATCH[3]}
-            # match code reviewer
-            if [[ ! $COMMIT_CONTENT =~ (Code *Reviewer){1} ]];then
-                log_info "Don't have Code Reviwer."
-            fi
-        else
-            log_error_exit ${ERR_MSG_TITLE_FORMAT}
-        fi
+        return ${ERROR_CODE_HEAD_FORMAT}
     fi
 }
 
@@ -272,26 +264,27 @@ validate_scope_message(){
     elif [[ ${COMMIT_SCOPE} =~ ^\(([\#\@]?[a-zA-Z0-9\.\#\@\|\-]*)\)$ ]]; then
         COMMIT_SCOPE_CONTENT=${BASH_REMATCH[1]}
         if [[ ${#COMMIT_SCOPE_CONTENT} -lt 2 ]]; then
-            log_error_exit "scope bad format less 2 ${COMMIT_SCOPE_CONTENT}"
-        fi
-        # split to task array
-        SCOPE_TASKS=(${COMMIT_SCOPE_CONTENT//|/ })
-        log_debug "SCOPES ${SCOPE_TASKS}"
-        SCOPE_TASKS_NUM=${#SCOPE_TASKS[@]}
-        log_debug "SCOPES_NUM ${SCOPE_TASKS_NUM}"
-        for ((i=0;i<$SCOPE_TASKS_NUM;i++)); do
-            if [[ ${#SCOPE_TASKS[i]} -lt 2 ]]; then
-                log_info "scope task bad format less 2 ${SCOPE_TASKS[i]}"
-            else
-                SCOPE_ITEM=${SCOPE_TASKS[i]}
-                if [[ ${SCOPE_ITEM} =~ ^[\#\@][0-9\.\-]*(\-commit)*$ ]]; then
-                    log_debug "task: ${SCOPE_ITEM}"
-                    process ${SCOPE_ITEM}
+            log_info "scope bad format less 2 ${COMMIT_SCOPE_CONTENT}"
+        else
+            # split to task array
+            SCOPE_TASKS=(${COMMIT_SCOPE_CONTENT//|/ })
+            log_debug "SCOPES ${SCOPE_TASKS}"
+            SCOPE_TASKS_NUM=${#SCOPE_TASKS[@]}
+            log_debug "SCOPES_NUM ${SCOPE_TASKS_NUM}"
+            for ((i=0;i<$SCOPE_TASKS_NUM;i++)); do
+                if [[ ${#SCOPE_TASKS[i]} -lt 2 ]]; then
+                    log_info "scope task bad format less 2 ${SCOPE_TASKS[i]}"
                 else
-                    log_info "scope: ${SCOPE_ITEM} isn't a bug or task."
+                    SCOPE_ITEM=${SCOPE_TASKS[i]}
+                    if [[ ${SCOPE_ITEM} =~ ^[\#\@][0-9]*$ ]]; then
+                        log_debug "task: ${SCOPE_ITEM}"
+                        process ${SCOPE_ITEM}
+                    else
+                        log_info "scope: ${SCOPE_ITEM} isn't a bug or task."
+                    fi
                 fi
-            fi
-        done
+            done
+        fi
     else
         log_info "scope bad format ${COMMIT_SCOPE}"
     fi
@@ -305,61 +298,17 @@ process(){
     log_debug "task type: ${SCOPE_TASK_TYPE}"
     # 截取除第一个字符的余下字符串
     SCOPE_TASK_PARAM=${1:1}
-    if [[ ${SCOPE_TASK_PARAM} =~ ^[0-9]+-*[0-9\.]*-*[0-9\.]*(\-commit)*$ ]]; then
-        log_debug "task param: ${SCOPE_TASK_PARAM}"
-        # 按 - 分隔获取所有参数 第一个为任务编号，第二个为所用时间，第三个为剩余时间
-        SCOPE_TASK_PARAMS=(${SCOPE_TASK_PARAM//-/ })
-        log_debug "task params: ${SCOPE_TASK_PARAMS}"
+    log_debug "task param: ${SCOPE_TASK_PARAM}"
+    if [[ "$SCOPE_TASK_TYPE" == "#" ]]; then
         # 处理bug
-        if [[ "$SCOPE_TASK_TYPE" == "#" ]]; then
-            if [[ ${#SCOPE_TASK_PARAMS[@]} == 1 ]]; then
-                log_debug "process_bug_finish ${SCOPE_TASK_PARAMS[0]}"
-                process_bug_finish ${SCOPE_TASK_PARAMS[0]}
-            elif [[ ${#SCOPE_TASK_PARAMS[@]} == 2 ]]; then
-                #log_debug "process_bug_log ${SCOPE_TASK_PARAMS[0]} ${SCOPE_TASK_PARAMS[1]}"
-                process_bug_log ${SCOPE_TASK_PARAMS[0]} ${SCOPE_TASK_PARAMS[1]}
-            else
-                log_info "bad bug params number, 1 or 2 only"
-            fi
+        process_bug_finish "${SCOPE_TASK_PARAM}"
+    elif [[ "$SCOPE_TASK_TYPE" == "@" ]]; then
         # 处理任务
-        elif [[ "$SCOPE_TASK_TYPE" == "@" ]]; then
-            if [[ ${#SCOPE_TASK_PARAMS[@]} == 1 ]]; then
-                log_debug "process_feature_finish ${SCOPE_TASK_PARAMS[0]}"
-                process_feature_finish ${SCOPE_TASK_PARAMS[0]}
-            elif [[ ${#SCOPE_TASK_PARAMS[@]} == 2 ]]; then
-                #log_debug "process_feature_log ${SCOPE_TASK_PARAMS[0]} ${SCOPE_TASK_PARAMS[1]}"
-                process_feature_log ${SCOPE_TASK_PARAMS[0]} ${SCOPE_TASK_PARAMS[1]}
-            elif [[ ${#SCOPE_TASK_PARAMS[@]} == 3 ]]; then
-                #log_debug "process_feature_log ${SCOPE_TASK_PARAMS[0]} ${SCOPE_TASK_PARAMS[1]} ${SCOPE_TASK_PARAMS[2]}"
-                process_feature_progress ${SCOPE_TASK_PARAMS[0]} ${SCOPE_TASK_PARAMS[1]} ${SCOPE_TASK_PARAMS[2]}
-            else
-                log_info "bad feature params number, 1, 2 or 3 only"
-            fi
-        else
-            log_info "unknow letter, olny accept: 0-9a-zA-Z#@-/"
-        fi
-    else
-        log_info "task format error ${SCOPE_TASK_PARAM}"
+        process_feature_finish "${SCOPE_TASK_PARAM}"
     fi
 }
 
 #######################################################################
-# 记录禅道bug 日志
-process_bug_log(){
-    log_debug "process bug log $1 $2"
-    # 执行登录，如果已经登录则忽略
-    do_login
-    # 发送记录禅道任务日志的请求
-    _URL="${ZT_HOST}?m=action&f=comment&objectType=bug&objectID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
-    log_debug ${_URL}
-    _URL_FORM_DATA="comment=${ENCODE_CONTENT}"
-    _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
-    # log_debug ${_RST}
-    if echo "${_RST}" | grep -w "login" &>/dev/null; then
-        log_info "post new log for bug[${1}] error"
-    fi
-    log_info "post log for bug[${1}] OK"
-}
 
 # 完成禅道bug
 process_bug_finish(){
@@ -367,74 +316,55 @@ process_bug_finish(){
     # 执行登录，如果已经登录则忽略
     do_login
     # 获取禅道BUG解决所需的信息 用时、抄送
-    _URL="${ZT_HOST}?m=bug&f=resolve&bugID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
+    _URL="${ZT_HOST}?m=bug&f=edit&bugID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
     # get infomations that finish task needed.
     _RST=`$(_curl_bin) GET "${_URL}"`
     if echo "${_RST}" | grep -vw "success" &>/dev/null; then
         log_info "do resolve bug[${1}] error, unknow reason"
     fi
-    # log_debug ${_RST}
     BUG_STATUS=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "status")
-    if [[ $BUG_STATUS == 'active' ]]; then
+    log_info "bug $1 is ${BUG_STATUS}"
+    if [[ $BUG_STATUS != 'resolved' ]]; then
         CON_FINISH_ASSIGNED=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "assignedTo")
         RESOLVED_BUILD_ID='trunk'
         BUILD_NAME=$(_next_build_name)
+        # echo "name: ${BUILD_NAME}"
         if [[ ! -z ${BUILD_NAME} ]];then
-            RESOLVED_BUILD_ID=$(_parse_json_in_note_key_by_value "${_RST}" "builds" "${BUILD_NAME}")
+            RESOLVED_BUILD_ID=$(_parse_json_in_note_key_by_value "${_RST}" "resolvedBuilds" "${BUILD_NAME}")
             if [[ ! ${RESOLVED_BUILD_ID} =~ ^[0-9]+$ ]]; then
                 RESOLVED_BUILD_ID='trunk'
-                log_info "没找到解决 BUG 的下一个版本： ${BUILD_NAME}，解决版本留空。"
+                log_info "没找到解决 BUG 的下一个版本： ${BUILD_NAME}，解决版本为 trunk"
             fi
         fi
-        # 发送完成禅道任务的请求
-        _URL_FORM_DATA="resolution=fixed&resolvedBuild=${RESOLVED_BUILD_ID}&assignedTo=${CON_FINISH_ASSIGNED}&resolvedDate=$(_date_time)&comment=${ENCODE_CONTENT}"
-        _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
-        log_debug ${_RST}
-        if echo "${_RST}" | grep -w "login" &>/dev/null; then
-            log_info "do resolve bug[${1}] error, need login"
+        OPENED_BUILD=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "openedBuild")
+        log_info "bug $1 begin with build: ${OPENED_BUILD}"
+        if [[ ! -z ${OPENED_BUILD} ]];then
+            ZT_RESOLVED_USER=$(_git_commit_auth "${GIT_COMMIT_INFO}")
+            RESOLVED_USER_NAME=$(_parse_json_in_note_value_by_key "${_RST}" "users" "${ZT_RESOLVED_USER}")
+            log_info "commited by: '${ZT_RESOLVED_USER}' who's name is '${RESOLVED_USER_NAME}'"
+            if [[ ! -z ${RESOLVED_USER_NAME} ]]; then
+                # 发送完成禅道任务的请求
+                RESOLVED_DATE=$(_git_commit_time "${GIT_COMMIT_INFO}")
+                COMMIT_HASH="<br>commit hash $(_git_commit_hash "${GIT_COMMIT_INFO}")"
+                _URL_FORM_DATA="resolution=fixed&openedBuild[]=${OPENED_BUILD}&resolvedBuild=${RESOLVED_BUILD_ID}&resolvedBy=${ZT_RESOLVED_USER}&assignedTo=${CON_FINISH_ASSIGNED}&resolvedDate=${RESOLVED_DATE}&comment=${ENCODE_CONTENT}${COMMIT_HASH}"
+                log_debug ${_URL_FORM_DATA}
+                _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
+                # log_debug ${_RST}
+                if echo "${_RST}" | grep -w "login" &>/dev/null; then
+                    log_info "do resolve bug[${1}] error, need login"
+                fi
+            else
+                log_info "${RESOLVED_USER_NAME}"
+            fi
+        else
+            log_info "do not find opened build"
         fi
     else
         log_info "bug[${1}] had been resolved"
     fi
 }
 
-
 #######################################################################
-# 记录禅道任务日志
-process_feature_log(){
-    log_debug "process feature log $1 $2"
-    # 执行登录，如果已经登录则忽略
-    do_login
-    # 发送记录禅道任务日志的请求
-    _URL="${ZT_HOST}?m=action&f=comment&objectType=task&objectID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
-    log_debug ${_URL}
-    _URL_FORM_DATA="dates%5B1%5D=$(_date_time)&objectType%5B1%5D=task&comment=${ENCODE_CONTENT}"
-    log_debug $_URL_FORM_DATA
-    _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
-    # log_debug ${_RST}
-    if echo "${_RST}" | grep -w "login" &>/dev/null; then
-        log_info "post new log for task[${1}] error"
-    fi
-    log_info "post log for task[${1}] OK"
-}
-
-# 记录禅道任务进度日志
-process_feature_progress(){
-    log_debug "process feature progress $1 $2 $3"
-    # 执行登录，如果已经登录则忽略
-    do_login
-    # 发送记录禅道任务日志的请求
-    _URL="${ZT_HOST}?m=task&f=restart&taskID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
-    log_debug ${_URL}
-    _URL_FORM_DATA="realStarted=$(_date_fmt)&consumed=${2}&left=${3}&comment=${ENCODE_CONTENT}"
-    log_debug $_URL_FORM_DATA
-    _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
-    log_debug ${_RST}
-    if echo "${_RST}" | grep -w "login" &>/dev/null; then
-        log_info "post new log for task[${1}] error"
-    fi
-    log_info "post log for task[${1}] OK"
-}
 
 # 完成禅道任务
 process_feature_finish(){
@@ -456,13 +386,17 @@ process_feature_finish(){
         CON_FINISH_ASSIGNED=$(_parse_json_in_note_value_by_key "${_RST}" "task" "assignedTo")
         # 发送完成禅道任务的请求
         _URL="${ZT_HOST}?m=task&f=finish&taskID=${1}&onlybody=yes&${ZT_SESSION_NAME}=${ZT_SESSION}&t=json"
-        _URL_FORM_DATA="consumed=${CON_FINISH_CONSUMED}&assignedTo=${CON_FINISH_ASSIGNED}&finishedDate=$(_date_time)&comment=${ENCODE_CONTENT}"
+        RESOLVED_DATE=$(_git_commit_time "${GIT_COMMIT_INFO}")
+        COMMIT_HASH="<br>commit hash $(_git_commit_hash "${GIT_COMMIT_INFO}")"
+        _URL_FORM_DATA="consumed=${CON_FINISH_CONSUMED}&assignedTo=${CON_FINISH_ASSIGNED}&finishedDate=${RESOLVED_DATE}&comment=${ENCODE_CONTENT}${COMMIT_HASH}"
+        log_info "${_URL_FORM_DATA}"
         _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
-        # log_debug ${_RST}
+        log_debug ${_RST}
         if echo "${_RST}" | grep -w "login" &>/dev/null; then
             log_info "do finish task[${1}] error, need login"
         fi
-
+    else
+        log_info "task[${1}] had been done"
     fi
 }
 
