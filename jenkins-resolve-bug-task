@@ -105,7 +105,7 @@ ERROR_CODE_HEAD_FORMAT=2
 # remove \" in json, and echo value for given key
 
 _parse_json_format(){
-    echo "${1}" | sed 's/\\"/"/g' | sed 's/\\\\\\\\/\\/g' | sed 's/\\\\/\\/g'
+    echo "${1}" | sed 's/\\"/"/g' | sed 's/\\\\\\/\\/g' | sed 's/\\\\/\\/g'
 }
 
 _parse_json_meta_note_by_key(){
@@ -178,8 +178,7 @@ log_title(){
 #####################################################################
 
 _git_commits() {
-    # git log --format="%s(%H)(%ae)(%ci)" "${GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${GIT_COMMIT}"
-    git log -100 --format="%s(%H)(%ae)(%ci)"
+    git log --format="%s(%H)(%ae)(%ci)" "${GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${GIT_COMMIT}"
 }
 
 _git_commit_head() {
@@ -326,6 +325,12 @@ process_bug_finish(){
     log_info "bug $1 is ${BUG_STATUS}"
     if [[ $BUG_STATUS != 'resolved' ]]; then
         CON_FINISH_ASSIGNED=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "assignedTo")
+        PRODUCT=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "product")
+        PROJECT=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "project")
+        MODULE=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "module")
+        PLAN=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "plan")
+        STORY=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "story")
+        TASK=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "task")
         RESOLVED_BUILD_ID='trunk'
         BUILD_NAME=$(_next_build_name)
         # echo "name: ${BUILD_NAME}"
@@ -333,7 +338,7 @@ process_bug_finish(){
             RESOLVED_BUILD_ID=$(_parse_json_in_note_key_by_value "${_RST}" "resolvedBuilds" "${BUILD_NAME}")
             if [[ ! ${RESOLVED_BUILD_ID} =~ ^[0-9]+$ ]]; then
                 RESOLVED_BUILD_ID='trunk'
-                log_info "没找到解决 BUG 的下一个版本： ${BUILD_NAME}，解决版本为 trunk"
+                log_info "Don't find RESOLVED_BUILD_ID: ${BUILD_NAME}, set to default: trunk"
             fi
         fi
         OPENED_BUILD=$(_parse_json_in_note_value_by_key "${_RST}" "bug" "openedBuild")
@@ -346,7 +351,7 @@ process_bug_finish(){
                 # 发送完成禅道任务的请求
                 RESOLVED_DATE=$(_git_commit_time "${GIT_COMMIT_INFO}")
                 COMMIT_HASH="<br>commit hash $(_git_commit_hash "${GIT_COMMIT_INFO}")"
-                _URL_FORM_DATA="resolution=fixed&openedBuild[]=${OPENED_BUILD}&resolvedBuild=${RESOLVED_BUILD_ID}&resolvedBy=${ZT_RESOLVED_USER}&assignedTo=${CON_FINISH_ASSIGNED}&resolvedDate=${RESOLVED_DATE}&comment=${ENCODE_CONTENT}${COMMIT_HASH}"
+                _URL_FORM_DATA="resolution=fixed&product=${PRODUCT}&project=${PROJECT}&module=${MODULE}&plan=${PLAN}&story=${STORY}&task=${TASK}&openedBuild[]=${OPENED_BUILD}&resolvedBuild=${RESOLVED_BUILD_ID}&resolvedBy=${ZT_RESOLVED_USER}&assignedTo=${CON_FINISH_ASSIGNED}&resolvedDate=${RESOLVED_DATE}&comment=${ENCODE_CONTENT}${COMMIT_HASH}"
                 log_debug ${_URL_FORM_DATA}
                 _RST=`$(_curl_bin) POST "${_URL}" -H "${_URL_CONTENT_TYPE}" -d "${_URL_FORM_DATA}"`
                 # log_debug ${_RST}
