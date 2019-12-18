@@ -178,7 +178,7 @@ log_title(){
 #####################################################################
 
 _git_commits() {
-    git log --format="%s(%H)(%ae)(%ci)" "${GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${GIT_COMMIT}"
+    git log --format="%s(%H)(%ae)(%ci)" ${GIT_PREVIOUS_SUCCESSFUL_COMMIT}..${GIT_COMMIT} --first-parent --no-merges
 }
 
 _git_commit_head() {
